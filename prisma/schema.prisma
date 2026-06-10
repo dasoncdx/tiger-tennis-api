@@ -1,0 +1,421 @@
+datasource db {
+  provider = "postgresql"
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// ─── 账号与角色 ───────────────────────────────
+
+enum Role {
+  STUDENT
+  COACH
+  ADMIN
+}
+
+enum AccountStatus {
+  PENDING
+  ACTIVE
+  DISABLED
+}
+
+model User {
+  id        String        @id @default(cuid())
+  name      String
+  phone     String        @unique
+  password  String
+  role      Role
+  status    AccountStatus @default(PENDING)
+  remark    String?
+  avatarUrl String?
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+
+  coachProfile     CoachProfile?
+  ntrpRecords      NtrpRecord[]          @relation("StudentRecords")
+  ntrpByCoach      NtrpRecord[]          @relation("CoachRecords")
+  ntrpApplications NtrpApplication[]     @relation("StudentApplications")
+  ntrpReviewed     NtrpApplication[]     @relation("ReviewedBy")
+  studentPackages  StudentPackage[]
+  privateBookings  Booking[]             @relation("StudentBookings")
+  coachBookings    Booking[]             @relation("CoachBookings")
+  coachSchedules   CoachSchedule[]
+  groupClasses     GroupClass[]
+  groupEnrollments GroupEnrollment[]
+  groupAttendances GroupAttendance[]     @relation("AttendanceStudent")
+  tournamentEntries TournamentEntry[]
+  trainingNotes    TrainingNote[]        @relation("StudentNotes")
+  coachNotes       TrainingNote[]        @relation("CoachNotes")
+  monthlyReports   MonthlyReport[]       @relation("StudentReports")
+  coachReports     MonthlyReport[]       @relation("CoachReports")
+  notifications    Notification[]
+}
+
+model CoachProfile {
+  id             String  @id @default(cuid())
+  userId         String  @unique
+  user           User    @relation(fields: [userId], references: [id])
+  specialty      String?
+  bio            String?
+  yearsExp       Int?
+  privateRate    Float   @default(0)
+  groupRate      Float   @default(0)
+  bonusThreshold Float   @default(80)
+  bonusPerPoint  Float   @default(0)
+}
+
+// ─── 段位体系 ─────────────────────────────────
+
+enum NtrpLevel {
+  LEVEL_2_5B
+  LEVEL_2_5A
+  LEVEL_3_0B
+  LEVEL_3_0A
+  LEVEL_3_5B
+  LEVEL_3_5A
+  LEVEL_4_0B
+  LEVEL_4_0A
+}
+
+model NtrpRecord {
+  id             String   @id @default(cuid())
+  studentId      String
+  student        User     @relation("StudentRecords", fields: [studentId], references: [id])
+  coachId        String
+  coach          User     @relation("CoachRecords", fields: [coachId], references: [id])
+  forehand       Int
+  backhand       Int
+  serve          Int
+  movement       Int
+  tactics        Int
+  matchMindset   Int?
+  remark         String?
+  applyPromotion Boolean  @default(false)
+  createdAt      DateTime @default(now())
+
+  application NtrpApplication?
+}
+
+enum ApplicationStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+model NtrpApplication {
+  id           String            @id @default(cuid())
+  studentId    String
+  student      User              @relation("StudentApplications", fields: [studentId], references: [id])
+  recordId     String            @unique
+  record       NtrpRecord        @relation(fields: [recordId], references: [id])
+  fromLevel    NtrpLevel
+  toLevel      NtrpLevel
+  status       ApplicationStatus @default(PENDING)
+  reviewerId   String?
+  reviewer     User?             @relation("ReviewedBy", fields: [reviewerId], references: [id])
+  reviewRemark String?
+  createdAt    DateTime          @default(now())
+  reviewedAt   DateTime?
+}
+
+// ─── 课程套餐 ─────────────────────────────────
+
+enum CourseType {
+  PRIVATE
+  GROUP
+}
+
+model CoursePackageTemplate {
+  id           String     @id @default(cuid())
+  name         String
+  type         CourseType
+  totalLessons Int
+  price        Float
+  validDays    Int
+  imageUrl     String?
+  isActive     Boolean    @default(true)
+  createdAt    DateTime   @default(now())
+
+  studentPackages StudentPackage[]
+}
+
+model StudentPackage {
+  id           String                @id @default(cuid())
+  studentId    String
+  student      User                  @relation(fields: [studentId], references: [id])
+  templateId   String
+  template     CoursePackageTemplate @relation(fields: [templateId], references: [id])
+  type         CourseType
+  totalLessons Int
+  usedLessons  Int                   @default(0)
+  startDate    DateTime
+  endDate      DateTime
+  remark       String?
+  createdAt    DateTime              @default(now())
+
+  consumptions LessonConsumption[]
+}
+
+model LessonConsumption {
+  id          String         @id @default(cuid())
+  packageId   String
+  package     StudentPackage @relation(fields: [packageId], references: [id])
+  bookingId   String?
+  booking     Booking?       @relation(fields: [bookingId], references: [id])
+  sessionId   String?
+  session     GroupSession?  @relation(fields: [sessionId], references: [id])
+  operatorId  String
+  remark      String?
+  createdAt   DateTime       @default(now())
+}
+
+// ─── 私教预约 ─────────────────────────────────
+
+enum BookingStatus {
+  PENDING
+  CONFIRMED
+  COMPLETED
+  CANCELLED
+}
+
+model CoachSchedule {
+  id          String   @id @default(cuid())
+  coachId     String
+  coach       User     @relation(fields: [coachId], references: [id])
+  startTime   DateTime
+  endTime     DateTime
+  isRecurring Boolean  @default(false)
+  createdAt   DateTime @default(now())
+}
+
+model Booking {
+  id           String        @id @default(cuid())
+  studentId    String
+  student      User          @relation("StudentBookings", fields: [studentId], references: [id])
+  coachId      String
+  coach        User          @relation("CoachBookings", fields: [coachId], references: [id])
+  startTime    DateTime
+  endTime      DateTime
+  venue        String?
+  status       BookingStatus @default(PENDING)
+  remark       String?
+  rejectReason String?
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  consumptions LessonConsumption[]
+  trainingNote TrainingNote?
+}
+
+// ─── 团课班级 ─────────────────────────────────
+
+enum GroupClassType {
+  RECURRING
+  FIXED
+}
+
+enum GroupClassStatus {
+  ACTIVE
+  INACTIVE
+}
+
+model GroupClass {
+  id                String           @id @default(cuid())
+  name              String
+  coachId           String
+  coach             User             @relation(fields: [coachId], references: [id])
+  classType         GroupClassType
+  venue             String?
+  ntrpRange         String?
+  capacity          Int
+  lessonsPerSession Int              @default(1)
+  description       String?
+  status            GroupClassStatus @default(ACTIVE)
+  weekday           Int?
+  startTimeStr      String?
+  endTimeStr        String?
+  effectiveFrom     DateTime?
+  createdAt         DateTime         @default(now())
+
+  sessions    GroupSession[]
+  enrollments GroupEnrollment[]
+}
+
+model GroupSession {
+  id          String     @id @default(cuid())
+  classId     String
+  class       GroupClass @relation(fields: [classId], references: [id])
+  startTime   DateTime
+  endTime     DateTime
+  venue       String?
+  isCompleted Boolean    @default(false)
+  createdAt   DateTime   @default(now())
+
+  attendances  GroupAttendance[]
+  consumptions LessonConsumption[]
+}
+
+model GroupEnrollment {
+  id        String        @id @default(cuid())
+  classId   String
+  class     GroupClass    @relation(fields: [classId], references: [id])
+  studentId String
+  student   User          @relation(fields: [studentId], references: [id])
+  packageId String?
+  status    BookingStatus @default(PENDING)
+  createdAt DateTime      @default(now())
+
+  @@unique([classId, studentId])
+}
+
+model GroupAttendance {
+  id         String       @id @default(cuid())
+  sessionId  String
+  session    GroupSession @relation(fields: [sessionId], references: [id])
+  studentId  String
+  student    User         @relation("AttendanceStudent", fields: [studentId], references: [id])
+  attended   Boolean
+  operatorId String
+  createdAt  DateTime     @default(now())
+
+  @@unique([sessionId, studentId])
+}
+
+// ─── 训练记录与月度反馈 ───────────────────────
+
+model TrainingNote {
+  id          String   @id @default(cuid())
+  studentId   String
+  student     User     @relation("StudentNotes", fields: [studentId], references: [id])
+  coachId     String
+  coach       User     @relation("CoachNotes", fields: [coachId], references: [id])
+  bookingId   String?  @unique
+  booking     Booking? @relation(fields: [bookingId], references: [id])
+  content     String
+  improvement String?
+  createdAt   DateTime @default(now())
+}
+
+model MonthlyReport {
+  id          String   @id @default(cuid())
+  studentId   String
+  student     User     @relation("StudentReports", fields: [studentId], references: [id])
+  coachId     String
+  coach       User     @relation("CoachReports", fields: [coachId], references: [id])
+  month       String
+  goodPoints  String
+  improvement String
+  suggestion  String
+  createdAt   DateTime @default(now())
+
+  @@unique([studentId, coachId, month])
+}
+
+// ─── 赛事 ────────────────────────────────────
+
+enum TournamentStatus {
+  DRAFT
+  PUBLISHED
+  CLOSED
+  FINISHED
+}
+
+model Tournament {
+  id                   String           @id @default(cuid())
+  name                 String
+  eventDate            DateTime
+  registrationDeadline DateTime
+  capacity             Int
+  rules                String
+  grouping             String?
+  coverUrl             String?
+  status               TournamentStatus @default(DRAFT)
+  createdAt            DateTime         @default(now())
+
+  entries TournamentEntry[]
+  awards  TournamentAward[]
+}
+
+model TournamentEntry {
+  id           String     @id @default(cuid())
+  tournamentId String
+  tournament   Tournament @relation(fields: [tournamentId], references: [id])
+  studentId    String
+  student      User       @relation(fields: [studentId], references: [id])
+  ntrpSnapshot String
+  ranking      Int?
+  createdAt    DateTime   @default(now())
+
+  awards        TournamentEntryAward[]
+  diagnosisCard DiagnosisCard?
+
+  @@unique([tournamentId, studentId])
+}
+
+model TournamentAward {
+  id           String     @id @default(cuid())
+  tournamentId String
+  tournament   Tournament @relation(fields: [tournamentId], references: [id])
+  name         String
+
+  entries TournamentEntryAward[]
+}
+
+model TournamentEntryAward {
+  entryId String
+  entry   TournamentEntry @relation(fields: [entryId], references: [id])
+  awardId String
+  award   TournamentAward @relation(fields: [awardId], references: [id])
+
+  @@id([entryId, awardId])
+}
+
+model DiagnosisCard {
+  id          String          @id @default(cuid())
+  entryId     String          @unique
+  entry       TournamentEntry @relation(fields: [entryId], references: [id])
+  goodPoint1  String
+  goodPoint2  String
+  improvement String
+  suggestion  String
+  sentAt      DateTime?
+  createdAt   DateTime        @default(now())
+}
+
+// ─── 通知 ────────────────────────────────────
+
+enum NotificationType {
+  BOOKING
+  NTRP
+  TOURNAMENT
+  FEEDBACK
+  SYSTEM
+}
+
+model Notification {
+  id        String           @id @default(cuid())
+  userId    String
+  user      User             @relation(fields: [userId], references: [id])
+  type      NotificationType
+  title     String
+  content   String
+  isRead    Boolean          @default(false)
+  createdAt DateTime         @default(now())
+}
+
+// ─── 机构配置 ────────────────────────────────
+
+model SiteConfig {
+  id        String   @id @default(cuid())
+  key       String   @unique
+  value     String
+  updatedAt DateTime @updatedAt
+}
+
+model Banner {
+  id        String   @id @default(cuid())
+  imageUrl  String
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+}
