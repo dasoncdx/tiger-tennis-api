@@ -190,20 +190,22 @@ users.get('/students/:id', authMiddleware, requireRole(Role.ADMIN, Role.COACH), 
 users.post('/student-coach', authMiddleware, requireRole(Role.ADMIN), async (c) => {
   const { studentId, coachId } = await c.req.json()
   if (!studentId || !coachId) return c.json({ success: false, error: '缺少参数' }, 400)
-  await (prisma as any).studentCoachRelation.upsert({
-    where: { studentId_coachId: { studentId, coachId } },
-    update: {},
-    create: { studentId, coachId },
-  })
+  // 用 raw SQL 避免依赖 Prisma 的 typed model（新表可能未 generate）
+  await prisma.$executeRaw`
+    INSERT INTO "StudentCoachRelation" (id, "studentId", "coachId", "createdAt")
+    VALUES (gen_random_uuid()::text, ${studentId}, ${coachId}, NOW())
+    ON CONFLICT ("studentId", "coachId") DO NOTHING
+  `
   return c.json({ success: true, data: { message: '关联成功' } })
 })
 
 // DELETE /api/v1/users/student-coach — 解绑
 users.delete('/student-coach', authMiddleware, requireRole(Role.ADMIN), async (c) => {
   const { studentId, coachId } = await c.req.json()
-  await (prisma as any).studentCoachRelation.deleteMany({
-    where: { studentId, coachId },
-  })
+  await prisma.$executeRaw`
+    DELETE FROM "StudentCoachRelation"
+    WHERE "studentId" = ${studentId} AND "coachId" = ${coachId}
+  `
   return c.json({ success: true, data: { message: '解绑成功' } })
 })
 
@@ -214,11 +216,14 @@ users.get('/coach-students/:coachId', authMiddleware, async (c) => {
   if (role === Role.COACH && userId !== coachId) {
     return c.json({ success: false, error: '无权限' }, 403)
   }
-  const relations = await (prisma as any).studentCoachRelation.findMany({
-    where: { coachId },
-    include: { student: { select: { id: true, name: true, phone: true, status: true } } } as any,
-  })
-  return c.json({ success: true, data: (relations as any[]).map((r: any) => r.student) })
+  const students = await prisma.$queryRaw<any[]>`
+    SELECT u.id, u.name, u.phone, u.status
+    FROM "StudentCoachRelation" r
+    JOIN "User" u ON u.id = r."studentId"
+    WHERE r."coachId" = ${coachId}
+    ORDER BY u.name
+  `
+  return c.json({ success: true, data: students })
 })
 
 // GET /api/v1/users/student-coaches/:studentId — 学员关联的教练列表
@@ -228,25 +233,15 @@ users.get('/student-coaches/:studentId', authMiddleware, async (c) => {
   if (role === Role.STUDENT && userId !== studentId) {
     return c.json({ success: false, error: '无权限' }, 403)
   }
-  const relations = await (prisma as any).studentCoachRelation.findMany({
-    where: { studentId },
-    include: {
-      coach: {
-        select: {
-          id: true,
-          name: true,
-          avatarUrl: true,
-          coachProfile: { select: { specialty: true, bio: true } },
-        },
-      },
-    } as any,
-  })
-  return c.json({ success: true, data: (relations as any[]).map((r: any) => ({
-    id: r.coach.id,
-    name: r.coach.name,
-    avatarUrl: r.coach.avatarUrl,
-    specialty: r.coach.coachProfile?.specialty,
-  })) })
+  const coaches = await prisma.$queryRaw<any[]>`
+    SELECT u.id, u.name, u."avatarUrl", cp.specialty
+    FROM "StudentCoachRelation" r
+    JOIN "User" u ON u.id = r."coachId"
+    LEFT JOIN "CoachProfile" cp ON cp."userId" = u.id
+    WHERE r."studentId" = ${studentId}
+    ORDER BY u.name
+  `
+  return c.json({ success: true, data: coaches })
 })
 
 // PATCH /api/v1/users/:id — 编辑用户
